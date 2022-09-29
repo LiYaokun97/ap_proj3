@@ -61,7 +61,19 @@ tests = testGroup "Minimal tests" [
     testCase "string-test5" $
        parseString "x = 'Just \\n a String \\\\ without others' #sadfewf \n #safwefwfsdf " @?=
         Right [SDef "x" (Const (StringVal ("Just \n a String \\ without others")))],
-    
+    testCase "string-test6" $
+       case parseString "'\t'" of 
+        Left e -> return ()
+        Right p -> assertFailure $ "Unexpected parse: " ++ show p,
+    testCase "string-test7" $
+       case parseString "'\DEL'" of 
+        Left e -> return ()
+        Right p -> assertFailure $ "Unexpected parse: " ++ show p,
+    testCase "string-test8" $
+       case parseString "'\NUL'" of 
+        Left e -> return ()
+        Right p -> assertFailure $ "Unexpected parse: " ++ show p,
+  
     testCase "number-test0" $
        parseString "x = -0" @?=
         Right [SDef "x" (Const (IntVal 0))],
@@ -122,7 +134,8 @@ tests = testGroup "Minimal tests" [
     testCase "oper-test7" $
        parseString "x = 3+5 != 3*(3+1)" @?=
         Right [SDef "x" (Not (Oper Eq (Oper Plus (Const $ IntVal 3) (Const $ IntVal 5)) (Oper Times (Const $IntVal 3) (Oper Plus (Const $ IntVal 3) (Const $ IntVal 1)) ) ))] ,
-    
+
+
     testCase "comment-test0" $
        parseString "x = # asfwef \n 3+5 != 3*(3+1)" @?=
         Right [SDef "x" (Not (Oper Eq (Oper Plus (Const $ IntVal 3) (Const $ IntVal 5)) (Oper Times (Const $IntVal 3) (Oper Plus (Const $ IntVal 3) (Const $ IntVal 1)) ) ))],
@@ -171,5 +184,53 @@ tests = testGroup "Minimal tests" [
                   [CCFor "x" (
                     Compr (Var "x") [CCFor "x" (Call "range" [Const $ IntVal 5])]
                   ),
-                  CCFor "y" (Call "range" [Const $IntVal 4]) ])]
-      ]
+                  CCFor "y" (Call "range" [Const $IntVal 4]) ])],
+
+    testCase "list-comprehension-test5" $
+      parseString "[x==y,x<y,x>y,x in y]" @?=
+        Right [SExp (List [Oper Eq (Var "x") (Var "y"),Oper Less (Var "x") (Var "y"),Oper Greater (Var "x") (Var "y"),Oper In (Var "x") (Var "y")])],
+
+    testCase "keywords-test0" $
+       parseString "[(x)not\tin(not(y)),[(x)for\ty\tin[z]if(u)]]" @?=
+        Right [SExp (List [Not (Oper In (Var "x") (Not (Var "y"))),Compr (Var "x") [CCFor "y" (List [Var "z"]),CCIf (Var "u")]])],
+    testCase "keywords-test1" $
+      parseString "not#foo\nx" @?=
+        Right [SExp (Not (Var "x"))],
+    testCase "keywords-test2" $
+       parseString "notx" @?=
+        Right [SExp (Var "notx")],
+
+    testCase "call-test0" $
+       parseString "h(True,k())" @?=
+        Right [SExp (Call "h" [Const TrueVal,Call "k" []])],
+    testCase "call-test1" $
+       parseString "[range(), range(1,2,3,4), range(None)]" @?=
+        Right [SExp (List [Call "range" [],Call "range" [Const (IntVal 1),Const (IntVal 2),Const (IntVal 3),Const (IntVal 4)],Call "range" [Const NoneVal]])],
+    testCase "call-test2" $
+       parseString "g(True)" @?=
+        Right [SExp (Call "g" [Const TrueVal])],
+    testCase "call-test3" $
+      parseString "f([False,2+y,not(z),[u]])" @?=
+        Right [SExp (Call "f" [List [Const FalseVal,Oper Plus (Const (IntVal 2)) (Var "y"),Not (Var "z"),List [Var "u"]]])],
+
+    testCase "parenthesis-test0" $
+      parseString "x = ((((((((((((((((((((((((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))))" @?=
+        Right [SDef "x" (Const $IntVal 1)],
+    testCase "parenthesis-test1" $
+      parseString "[[[[[[[[[[[[[[[[x]]]]]]]]]]]]]]]]" @?=
+        Right [SExp (List [List [List [List [List [List [List [List [List [List [List [List [List [List [List [List [Var "x"]]]]]]]]]]]]]]]])],
+    testCase "parenthesis-test2" $
+      parseString "x = (((((((((((((((((((((((((((((((# I'm a comment!!!\n(((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))))" @?=
+        Right [SDef "x" (Const $IntVal 1)],
+    testCase "parenthesis-test3" $
+      parseString "[[[#I'm a comment!!!hhhh \n[[[[[[[[[[[[[x]]]]]]]]]]]]]]]]" @?=
+        Right [SExp (List [List [List [List [List [List [List [List [List [List [List [List [List [List [List [List [Var "x"]]]]]]]]]]]]]]]])],
+    testCase "parenthesis-test4" $
+      case parseString "[[[[[[[[[[[[[[[[x]]]]]]]]]]]]]]]" of 
+        Left e -> return ()
+        Right p ->  assertFailure $ "Unexpected parse: " ++ show p,
+    testCase "parenthesis-test5" $
+      case parseString "[[[[[[[#aslkfjlwekj [[[[[[[[[x]]]]]]]]]]]]]]]]" of 
+        Left e -> return ()
+        Right p ->  assertFailure $ "Unexpected parse: " ++ show p
+        ]

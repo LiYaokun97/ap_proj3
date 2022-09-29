@@ -1,0 +1,387 @@
+{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
+-- Skeleton file for Boa Parser.
+
+module BoaParser (ParseError, parseString) where
+
+import BoaAST
+import Text.ParserCombinators.ReadP
+import Data.Char
+
+type ParseError = String -- you may replace this
+type Parser a = ReadP a
+parseString :: String -> Either ParseError Program
+parseString s = case readP_to_S pProgram s of
+                   [] -> Left "wrong"
+                   x -> case x of
+                           [(e,"")] -> Right e
+                           _  -> Left "wrong"
+
+reserved :: [String]
+reserved = ["None", "True", "False", "for", "if", "in", "not"]
+
+-- parseString :: String -> Either ParseError String
+-- parseString s = case readP_to_S pProgram s of
+--                    a-> Right (show a)
+--                    otherwise -> Left "wrong"
+
+
+-- parseString :: String -> Either ParseError String 
+-- parseString s = case readP_to_S pNum s of
+--                    [] -> Left "wrong"
+--                    x -> case last x of
+--                            (exp,_) -> Right (show x)
+--                            _ -> Left "wrong"
+--   Program ::= Stmts
+pProgram :: Parser Program
+pProgram = do skipAll
+              pStmts
+
+
+--   Stmts ::= Stmt';'Stmts | Stmt
+pStmts :: Parser [Stmt]
+pStmts =  do
+             n <- pStmt
+             symbol ";"
+             m <- pStmts
+             return $ n:m
+       <++
+          do n <- pStmt
+             return [n]
+
+--   Stmt ::= ident '=' Exp1 | Exp1
+pStmt :: Parser Stmt
+pStmt =  do
+            n <- pIdent
+            symbol "="
+            SDef n <$> pExp1 
+      <++
+         do SExp <$> pExp1
+
+--   Exp1 ::= 'not' Exp1 | Exp2
+pExp1 :: Parser Exp
+pExp1  = do
+           symbol1 "not"
+           Not <$> pExp1 
+       <++
+           pExp2 
+
+--   Exp2 ::= Exp3 opExp2
+pExp2 :: Parser Exp
+pExp2  = do a <- pExp3
+            opExp2 a
+
+--   opExp2 ::= ε | '==' Exp3 | '<' Exp3 | '>' Exp3 | 'in' Exp3 | 'not' 'in' Exp3 | '<=' Exp3 | '>=' Exp3 | '!=' Exp3
+opExp2 :: Exp -> Parser Exp
+opExp2 a= do symbol "=="
+             Oper Eq a <$> pExp3 
+       <++
+          do  symbol "<"
+              Oper Less a <$> pExp3
+       <++
+          do  symbol ">"
+              Oper Greater a <$> pExp3
+       <++
+          do  symbol1 "in"
+              Oper In a <$> pExp3
+       <++
+          do  symbol1 "not"
+              symbol1 "in"
+              Not . Oper In a <$> pExp3
+       <++
+          do  symbol "<="
+              Not . Oper Greater a <$> pExp3
+       <++
+          do  symbol ">="
+              Not . Oper Less a<$> pExp3
+       <++
+          do  symbol "!="
+              Not . Oper Eq a <$> pExp3
+       <++
+          return a
+
+--   Exp3 ::= Exp4 opExp3 
+pExp3 :: Parser Exp
+pExp3  = do a <- pExp4
+            opExp3  a
+
+--   opExp3 ::= ε | '+' Exp4 opExp3 | '-' Exp4 opExp3
+opExp3 :: Exp -> Parser Exp
+opExp3 a = do 
+             symbol "+"
+             b<- pExp4
+             opExp3 ( Oper Plus a b )
+        <++
+           do 
+             symbol "-"
+             b<- pExp4
+             opExp3 ( Oper Minus a b )
+        <++
+           return a
+
+--   Exp4 ::= Term opExp4 
+pExp4 :: Parser Exp
+pExp4  = do a <- pTerm
+            opExp4 a
+
+--   opExp4 ::= ε | '*' Term opExp4 | '//' Term opExp4 | '%' Term opExp4 
+opExp4 :: Exp -> Parser Exp
+opExp4 a = do 
+             symbol "*"
+             b<- pTerm
+             opExp4 $ Oper Times a b 
+        <++
+           do 
+             symbol "//"
+             b<- pTerm
+             opExp4 $ Oper Div a b 
+        <++
+           do 
+             symbol "%"
+             b<- pTerm
+             opExp4 $ Oper Mod a b 
+        <++
+           return a
+
+--   Term ::= numConst | '(' Exp1 ')'| ident '(' Exp1 ')' | '[' Exp1 ForClause Clausez']' | '[' Exprs']' | ident | stringConst | 'None' | 'True' | 'False'
+pTerm:: Parser Exp
+pTerm =
+            do pNum     --need - or num
+        <++ do symbol "("
+               e<-pExp1
+               symbol ")"
+               return e
+        <++ do pCall    --need ident and (       
+        <++ do pCompr   --need[ and 1 expersion with for
+        <++ do pList    --need[ and 1 expersion with , and 1 expersion and skipall
+        <++ do Var <$> pIdent -- need isLetter and a string, then not resevereds
+        <++ do pString  --need '
+        <++ do pNone
+        <++ do pTrue
+        <++ do pFalse
+
+
+
+pNum::Parser Exp
+pNum = do
+         char '-'
+         d  <- satisfy (\v -> isDigit v && v /= '0')
+         ds <- munch isDigit
+         skipAll
+         return (Const (IntVal (read ('-': d : ds) :: Int)))
+    <++
+      do d  <- satisfy (\v -> isDigit v && v /= '0')
+         ds <- munch isDigit
+         skipAll
+         return (Const (IntVal (read (d : ds) :: Int)))
+    <++
+      do symbol  "-0"
+         return (Const (IntVal 0))
+    <++
+      do char '0'
+         skipAll
+         return (Const (IntVal 0))
+
+
+pString = do
+             char '\''
+             r <- pStringCheck ""
+             return $ Const $ StringVal r
+
+pStringCheck :: String -> Parser String
+pStringCheck s = do
+                    char '\\'
+                    char 'n'
+                    pStringCheck $ s ++ "\n"
+               <++
+                  do
+                    char '\\'
+                    char '\\'
+                    pStringCheck $ s ++ "\\"
+               <++
+                  do
+                    char '\\'
+                    char '\''
+                    pStringCheck $ s ++ "'"
+               <++
+                  do
+                    char '\\'
+                    char '\n'
+                    pStringCheck s
+               <++
+                  do
+                    a <- satisfy (\v -> isPrint v && v /= '\\' && v /= '\'' && v /= '\n')
+                    pStringCheck $ s ++ [a]
+               <++
+                  do
+                    char '\''
+                    skipAll
+                    return s
+
+
+pIdent :: Parser String
+pIdent = lexeme $ do
+            a <- satisfy (\x -> isLetter x ||  x =='_')
+            as <- munch (\x -> isLetter x || isDigit x ||  x =='_' &&  x /='#')
+            let n = a : as
+            if n `notElem` reserved then return n
+                        else return pfail "Wrong ident!!!"
+
+
+pList :: Parser Exp
+pList =  do
+           symbol "["
+           expz <- pExpz
+           symbol "]"
+           return $ List expz
+
+--   Exprz ::= ε | Exprs 
+pExpz :: Parser [Exp]
+pExpz = do 
+           pExps
+       <++ return []
+
+--   Exprs ::= Expr | Expr ',' Exprs     -- Exprs 逗号之后不能是空，所以exprs和exprz不能合并
+pExps :: Parser [Exp]
+pExps = do 
+          e <- pExp1
+          symbol ","
+          es <- pExps
+          return (e:es) 
+     <++
+        do 
+          e <- pExp1
+          return  [e]  
+
+pCall :: Parser Exp
+pCall = do
+           a <- pIdent
+           symbol "("
+           e<- pExpz
+           symbol ")"
+           return $ Call a e
+
+pCompr :: Parser Exp
+pCompr = do
+           symbol "["
+           e <- pExp1
+           for <- pFor
+           other <- pClause
+           symbol "]"
+           return $ Compr e (for ++ other)
+
+--   Clausez ::= ε | ForClause Clausez | IfClause Clausez
+pClause:: Parser [CClause]
+pClause= do e <- pFor
+            es <- pClause
+            return $ e ++ es 
+      <++
+         do e <- pIf
+            es <- pClause
+            return $ e ++ es 
+      <++
+         do skipAll
+            return []
+
+--   ForClause ::= 'for' ident 'in' Exp1
+pFor :: Parser [CClause]
+pFor = do
+           symbol1 "for"
+           name <- pIdent
+           symbol1 "in"
+           e <- pExp1
+           return  [CCFor name e]
+
+--   IfClause ::= 'if' Exp1
+pIf :: Parser [CClause]
+pIf = do
+           symbol1 "if"
+           e <- pExp1
+           return  [CCIf e]
+
+
+pNone::Parser Exp
+pNone = do symbol "None"
+           return $ Const NoneVal
+
+pTrue::Parser Exp
+pTrue = do symbol "True"
+           return $ Const TrueVal
+
+pFalse::Parser Exp
+pFalse = do symbol "False"
+            return $ Const FalseVal
+
+
+
+
+
+-- lexeme:: Parser a -> Parser a
+-- lexeme p = do
+--              skipMany (munch  isSpace) <|> skipMany1 pComment 
+--              a <- p
+--              skipMany (munch  isSpace) <|> skipMany1 pComment 
+--              return a
+symbol:: String ->Parser ()
+symbol s = do
+              string s
+              skipAll
+              return ()
+
+
+symbol1:: String ->Parser ()
+symbol1 s =lexeme $ do
+              string s
+              a <-look
+              if head a == '[' || head a == '(' ||  isSpace (head a)|| head a == '#' then return ()
+                else return pfail"sss"
+-- pComment :: Parser String
+-- pComment = between (string "#")  (char '\n') (munch  (/= '\n'))
+
+-- pComment :: Parser String
+-- pComment = between (string "#") eof (munch  (/= '\n'))
+-- whitespace:: Parser ()
+-- whitespace = do munch  isSpace
+--                 return ()
+-- eofComment:: Parser ()
+-- eofComment = do string "#"
+--                 munch isAscii
+--                 return ()
+-- eofComment:: Parser ()
+-- eofComment = do string "#"
+--                 skipMany1  (between (string "#") eof (munch  (/= '\n')))
+--                 return ()
+-- lexeme:: Parser a -> Parser a
+-- lexeme p = do a<- p
+--               whitespace
+--               return a
+skipAll :: Parser ()
+skipAll = do
+            skipSpaces
+            s <- look
+            if s == "" then return ()
+                  else (if s /= "" && head s == '#' then do munch1 (/= '\n'); skipAll
+                                      else do skipSpaces; return ())
+
+lexeme:: Parser a -> Parser a
+lexeme p = do
+            -- skipAll
+             a <- p
+             skipAll
+             return a
+
+
+-- lexeme:: Parser a -> Parser a
+-- lexeme p = do
+--              whitespace <|> skipMany1 pComment
+--              a <- p
+--              whitespace <|> skipMany1 pComment
+--              return a
+
+-- lexeme1:: Parser a -> Parser a
+-- lexeme1 p = do
+--              whitespace <|> skipMany1 pComment
+--              a <- p
+--              whitespace <|> skipMany1 pComment <|> eofComment
+--              return a

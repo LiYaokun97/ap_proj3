@@ -11,26 +11,26 @@ module BoaParser (ParseError, parseString) where
 import BoaAST
 import Text.ParserCombinators.ReadP
 import Data.Char
-import qualified Data.Set as Set
+import qualified Data.Map as Map
 
 type ParseError = String -- you may replace this
 type Parser a = ReadP a
 parseString :: String -> Either ParseError Program
 parseString s = case readP_to_S pProgram s of
-                   [] -> Left "empty parsing"
+                   [] -> Left "empty parsing!!!"
                    x -> case x of
-                           [(e,"")] -> Right e
-                           ls -> Left ("z" ++ show ls)
+                           [ (e, "")] -> Right e
+                           ls -> Left (show ls)
 
--- use set, so when query, the complexity is O(nlgn)
-keywords :: Set.Set String
-keywords = Set.fromList["None", "True", "False", "for", "if", "in", "not"]
+-- use Map, so when query, the complexity is O(1)
+keywords = Map.fromList[("None", 1), ("True",1), ("False",1), ("for",1), ("if",1), ("in",1), ("not",1)]
 
+-- forceSpaceKeyWords = Map.fromList["for", "if", "in", "not"]
 
 pProgram :: Parser Program
-pProgram = do skipSpaceAndComment
+pProgram = do
+              skipSpaceAndComment
               pStmts
-
 
 --   Stmts ::= Stmt';'Stmts| Stmt
 pStmts :: Parser [Stmt]
@@ -46,61 +46,63 @@ pStmts =  do
 --   Stmt ::= ident '=' Exp1| Exp1
 pStmt :: Parser Stmt
 pStmt =  do
-            var <- pIdent
+            var <- pIndentSkipSpace
             symbol "="
-            SDef var <$> pExp1
+            SDef var <$> pExpr
       <++
-         do SExp <$> pExp1
+         do SExp <$> pExpr
 {-
 In python, the priority of "not" is lower than "+" "-" and "*" "//".
 So when rewriting the grammer, "not" should be handled before "+" and "*"  
 Exp1 ::= 'not' Exp1 | Exp2
 -}
-pExp1 :: Parser Exp
-pExp1  = do
-           symbol "not"
-           Not <$> pExp1
+pExpr :: Parser Exp
+pExpr  = do
+           symbolForceFollowingSpace "not"
+           Not <$> pExpr
        <++
            pExp2
 
---   Exp2 ::= Exp3 opExp2
+--   Exp2 ::= Exp3 operationExp
 pExp2 :: Parser Exp
-pExp2  = do a <- pExp3
-            opExp2 a
+pExp2  = do a <- pExpr3
+            operationExp a
 
 
---   opExp2 ::= ε | '==' Exp3 | '<' Exp3 | '>' Exp3 | 'in' Exp3 | 'not' 'in' Exp3 | '<=' Exp3 | '>=' Exp3 | '!=' Exp3
-opExp2 :: Exp -> Parser Exp
-opExp2 a= do symbol "=="
-             Oper Eq a <$> pExp3
+--   operationExp ::= ε | '==' Exp3 | '<' Exp3 | '>' Exp3 | 'in' Exp3 | 'not' 'in' Exp3 | '<=' Exp3 | '>=' Exp3 | '!=' Exp3
+operationExp :: Exp -> Parser Exp
+operationExp exp =
+          do symbol "=="
+             Oper Eq exp <$> pExpr3
        <++
           do  symbol "<"
-              Oper Less a <$> pExp3
+              Oper Less exp <$> pExpr3
        <++
           do  symbol ">"
-              Oper Greater a <$> pExp3
+              Oper Greater exp <$> pExpr3
        <++
-          do  symbol "in"
-              Oper In a <$> pExp3
+          do  symbolForceFollowingSpace "in"
+              Oper In exp <$> pExpr3
        <++
-          do  symbol "not"
-              symbol "in"
-              Not . Oper In a <$> pExp3
+          do  symbolForceFollowingSpace "not"
+              symbolForceFollowingSpace "in"
+              Not . Oper In exp <$> pExpr3
        <++
           do  symbol "<="
-              Not . Oper Greater a <$> pExp3
+              Not . Oper Greater exp <$> pExpr3
        <++
           do  symbol ">="
-              Not . Oper Less a<$> pExp3
+              Not . Oper Less exp<$> pExpr3
        <++
           do  symbol "!="
-              Not . Oper Eq a <$> pExp3
+              Not . Oper Eq exp <$> pExpr3
        <++
-          return a
+          return exp
 
 
-pExp3 :: Parser Exp
-pExp3  = do a <- pExp4
+pExpr3 :: Parser Exp
+pExpr3  = do 
+            a <- pExpr4
             plusExp  a
 
 
@@ -108,19 +110,20 @@ pExp3  = do a <- pExp4
 plusExp :: Exp -> Parser Exp
 plusExp a = do
              symbol "+"
-             b<- pExp4
+             b<- pExpr4
              plusExp ( Oper Plus a b )
         <++
            do
              symbol "-"
-             b<- pExp4
+             b<- pExpr4
              plusExp ( Oper Minus a b )
         <++
            return a
 
 
-pExp4 :: Parser Exp
-pExp4  = do a <- pTerm
+pExpr4 :: Parser Exp
+pExpr4  = do 
+            a <- term
             timesExp a
 
 
@@ -128,42 +131,52 @@ pExp4  = do a <- pTerm
 timesExp :: Exp -> Parser Exp
 timesExp a = do
              symbol "*"
-             b<- pTerm
+             b<- term
              timesExp $ Oper Times a b
         <++
            do
              symbol "//"
-             b<- pTerm
+             b<- term
              timesExp $ Oper Div a b
         <++
            do
              symbol "%"
-             b<- pTerm
+             b<- term
              timesExp $ Oper Mod a b
         <++
            return a
 
-pTerm:: Parser Exp
-pTerm = do pNumSkipAll
+term:: Parser Exp
+term = do pNumSkipAll
         <++ do pParenthesesExp
         <++ do pCall
         <++ do pCompr
-        <++ do pVar
         <++ do pList
+        <++ do pVar
         <++ do pString
+        <++ do pNone
         <++ do pTrue
         <++ do pFalse
-        <++ do pNone
 
 
+pNone::Parser Exp
+pNone = do symbol "None"
+           return $ Const NoneVal
+
+pTrue::Parser Exp
+pTrue = do symbol "True"
+           return $ Const TrueVal
+
+pFalse::Parser Exp
+pFalse = do symbol "False"
+            return $ Const FalseVal
 
 pParenthesesExp :: Parser Exp
-pParenthesesExp = between (symbol "(") (symbol ")") pExp1
+pParenthesesExp = between (symbol "(") (symbol ")") pExpr
 
 -- ident   
 pVar :: Parser Exp
-pVar = do
-        Var <$> pIdent
+pVar = do Var <$> pIndentSkipSpace
 
 -- the first digit of a number shouldn't be 0 unless the number is 0
 pInteger :: Bool -> Parser Exp
@@ -200,7 +213,7 @@ pString = do
 
 pStringHelper :: String -> Parser String
 pStringHelper s = do
-                    a <- satisfy (\x -> isAscii x && x /= '\'' && x /= '\\' && x /= '\n')
+                    a <- satisfy (\x -> isPrint x && x /= '\'' && x /= '\\' && x /= '\n')
                     pStringHelper $ s ++ [a]
                <++ do
                     string "\\n"
@@ -226,52 +239,63 @@ pStringHelper s = do
                   return s
 
 
-pIdent :: Parser String
-pIdent = lexeme $ do
-            a <- satisfy (\x ->  x =='_' || isLetter x )
-            as <- munch (\x -> x =='_' || isLetter x || isDigit x)
+pIndentSkipSpace :: Parser String
+pIndentSkipSpace = symbolHelper pIndent
+
+pIndent :: Parser String
+pIndent = do
+            a <- satisfy (\x ->  x =='_' || isLetter x && isPrint x)
+            as <- munch (\x -> x =='_' || isLetter x || isDigit x && isPrint x)
             let n = a : as
-            if not (Set.member n keywords) then return n
-                        else return pfail "indentity can not be the same as keyword"
+            case Map.lookup n keywords of
+               Just x -> return pfail "indentity can not be the same as keyword"
+               Nothing -> return n
 
-
+{-
+   handling situation where there are two pairs of brackets first, it is not elegant,
+   but useful to reduce the complexity in situation like deep brackets.
+-}
 pList :: Parser Exp
-pList =  do
-           symbol "["
-           expz <- pExpz
-           symbol "]"
-           return $ List expz
+pList = 
+      do  
+         symbol "["
+         expz <- pList
+         symbol "]"
+         return $ List [expz]
+   <++
+      do
+         expz <- between (symbol "[") (symbol "]") pExprz
+         return $ List expz
 
-
-pExpz :: Parser [Exp]
-pExpz = do
-           pExps
+pExprz :: Parser [Exp]
+pExprz = do
+           pExprs
        <++ return []
 
 
-pExps :: Parser [Exp]
-pExps = do
-          e <- pExp1
+pExprs :: Parser [Exp]
+pExprs = do
+          e <- pExpr
           symbol ","
-          es <- pExps
+          es <- pExprs
           return (e:es)
      <++
         do
-          e <- pExp1
+          e <- pExpr
           return  [e]
 
 pCall :: Parser Exp
 pCall = do
-           a <- pIdent
-           symbol "("
-           e<- pExpz
-           symbol ")"
+           a <- pIndentSkipSpace
+           e<- between (symbol "(") (symbol ")") pExprz
            return $ Call a e
 
 pCompr :: Parser Exp
-pCompr = do
+
+pCompr =
+         do
            symbol "["
-           e <- pExp1
+           e <- pExpr
            for <- pFor
            other <- pClause
            symbol "]"
@@ -293,31 +317,17 @@ pClause= do e <- pFor
 
 pFor :: Parser [CClause]
 pFor = do
-           symbol "for"
-           name <- pIdent
-           symbol "in"
-           e <- pExp1
+           name <- between (symbolForceFollowingSpace "for") (symbolForceFollowingSpace "in") pIndentSkipSpace
+           e <- pExpr
            return  [CCFor name e]
 
 
 pIf :: Parser [CClause]
 pIf = do
-           symbol "if"
-           e <- pExp1
+           symbolForceFollowingSpace "if"
+           e <- pExpr
            return  [CCIf e]
 
-
-pNone::Parser Exp
-pNone = do symbol "None"
-           return $ Const NoneVal
-
-pTrue::Parser Exp
-pTrue = do symbol "True"
-           return $ Const TrueVal
-
-pFalse::Parser Exp
-pFalse = do symbol "False"
-            return $ Const FalseVal
 
 {-
 when getting a simple, handle the following space or comment at the same time,
@@ -325,16 +335,23 @@ then we don't need to consider space or comment when dealing with next expressio
 -}
 symbol:: String ->Parser ()
 symbol s = do
-              string s
-              skipSpaceAndComment
-              return ()
+               string s
+               skipSpaceAndComment
+               return ()
 
-lexeme:: Parser a -> Parser a
-lexeme p = do
+symbolHelper:: Parser a -> Parser a
+symbolHelper p = do
              a <- p
              skipSpaceAndComment
              return a
 
+symbolForceFollowingSpace :: String -> Parser ()
+symbolForceFollowingSpace s = do
+   string s
+   x <- look
+   if head x == '[' || isSpace (head x) || head x == '(' || head x == '#'
+      then skipSpaceAndComment
+      else return pfail "keywords can not be used as variable"
 
 {- 
 Because Boa is not indentation-sensitive, there may be newline or even comment 

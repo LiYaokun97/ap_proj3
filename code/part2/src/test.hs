@@ -4,7 +4,6 @@ module BoaParser where
 import BoaAST
 import Text.ParserCombinators.ReadP
 import Data.Char
-import GHC.Float (fromRat'')
 
 stringConst :: ReadP Exp
 stringConst = between  (char '(')
@@ -125,13 +124,28 @@ skipSpacesTest s = do
                         return [x]
 
 
+
+pIdent :: Parser String
+pIdent = symbolHelper $ do
+            a <- satisfy (\x ->  x =='_' || isLetter x )
+            as <- munch (\x -> x =='_' || isLetter x || isDigit x)
+            let n = a : as
+            if True then return n
+                        else return pfail "indentity can not be the same as keyword"
+
+symbolHelper:: Parser a -> Parser a
+symbolHelper p = do
+             a <- p
+             skipSpaceAndComment
+             return a
+
+
 skipSpaceAndComment :: Parser()
 skipSpaceAndComment = do
    skipSpaces
    s <- look
-   if s /="" && head s == '#' then 
-      do 
-         between (char '#') (char '\n') (munch (\x -> x/='\n' && isPrint x))
+   if s /="" && head s == '#' then
+      do
+         munch1 (/= '\n')
          skipSpaceAndComment
    else return ()
--- x = 'Just \\n a String \\\\ without others' #sadfewf \n #safwefwfsdf 
