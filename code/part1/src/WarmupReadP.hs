@@ -12,20 +12,8 @@ module WarmupReadP where
 --  E1 ::= "+" T E1 | "-" T E1 | ε
 --  T  ::= num | "(" E ")" 
 
--- Original grammar (E is start symbol):
---   E ::= E "+" T | E "-" T | T | "-" T .
---   T ::= num | "(" E ")" .
--- Lexical specifications:
---   num is one or more decimal digits (0-9)
---   tokens may be separated by arbtrary whitespace (spaces, tabs, newlines).
-
--- Rewritten grammar, without left-recursion:
---  E  ::= T E1| "-" T E1
---  E1 ::= "+" T E1 | "-" T E1 | ε
---  T  ::= num | "(" E ")" 
 import Text.ParserCombinators.ReadP
     ( string, munch, satisfy, char, (<++), readP_to_S, ReadP, skipSpaces )
-import Control.Applicative ((<|>))
   -- may use instead of +++ for easier portability to Parsec
 import Data.Char
 
@@ -60,6 +48,7 @@ pExp =
       skipSpaces
       t <- pTerm
       pExp1 (Negate t)
+
 
 -- E1 ::= "+" T E1 | "-" T E1 | ε
 pExp1 :: Exp -> Parser Exp
@@ -105,13 +94,11 @@ pInteger = do
 pNum::Parser Exp
 pNum = 
       do 
+        string "0"
+        return $Num 0 
+    <++
+      do 
         exp <- pInteger
         skipSpaces
         return exp 
-    <++
-      do 
-        char '0'
-        skipSpaces
-        return (Num 0)
-
 

@@ -46,7 +46,7 @@ pStmts =  do
 --   Stmt ::= ident '=' Exp1| Exp1
 pStmt :: Parser Stmt
 pStmt =  do
-            var <- pIndentSkipSpace
+            var <- pIndent
             symbol "="
             SDef var <$> pExpr
       <++
@@ -58,7 +58,7 @@ Exp1 ::= 'not' Exp1 | Exp2
 -}
 pExpr :: Parser Exp
 pExpr  = do
-           symbolForceFollowingSpace "not"
+           keywordsForceFollowSpace "not"
            Not <$> pExpr
        <++
            pExp2
@@ -81,11 +81,11 @@ operationExp exp =
           do  symbol ">"
               Oper Greater exp <$> pExpr3
        <++
-          do  symbolForceFollowingSpace "in"
+          do  keywordsForceFollowSpace "in"
               Oper In exp <$> pExpr3
        <++
-          do  symbolForceFollowingSpace "not"
-              symbolForceFollowingSpace "in"
+          do  keywordsForceFollowSpace "not"
+              keywordsForceFollowSpace "in"
               Not . Oper In exp <$> pExpr3
        <++
           do  symbol "<="
@@ -102,23 +102,23 @@ operationExp exp =
 
 pExpr3 :: Parser Exp
 pExpr3  = do 
-            a <- pExpr4
-            plusExp  a
+            exp <- pExpr4
+            plusExp exp
 
 
 -- for plus and minus
 plusExp :: Exp -> Parser Exp
-plusExp a = do
+plusExp exp = do
              symbol "+"
-             b<- pExpr4
-             plusExp ( Oper Plus a b )
+             exp' <- pExpr4
+             plusExp ( Oper Plus exp exp' )
         <++
            do
              symbol "-"
-             b<- pExpr4
-             plusExp ( Oper Minus a b )
+             exp' <- pExpr4
+             plusExp ( Oper Minus exp exp' )
         <++
-           return a
+           return exp
 
 
 pExpr4 :: Parser Exp
@@ -176,7 +176,7 @@ pParenthesesExp = between (symbol "(") (symbol ")") pExpr
 
 -- ident   
 pVar :: Parser Exp
-pVar = do Var <$> pIndentSkipSpace
+pVar = do Var <$> pIndent
 
 -- the first digit of a number shouldn't be 0 unless the number is 0
 pInteger :: Bool -> Parser Exp
@@ -239,21 +239,20 @@ pStringHelper s = do
                   return s
 
 
-pIndentSkipSpace :: Parser String
-pIndentSkipSpace = symbolHelper pIndent
-
 pIndent :: Parser String
 pIndent = do
             a <- satisfy (\x ->  x =='_' || isLetter x && isPrint x)
             as <- munch (\x -> x =='_' || isLetter x || isDigit x && isPrint x)
+            skipSpaceAndComment
             let n = a : as
             case Map.lookup n keywords of
-               Just x -> return pfail "indentity can not be the same as keyword"
+               Just _ -> return pfail "indentity can not be the same as keyword"
                Nothing -> return n
-
+            
 {-
-   handling situation where there are two pairs of brackets first, it is not elegant,
-   but useful to reduce the complexity in situation like deep brackets.
+   handling situation where there are more than a pair of brackets first, through recursive calls of pList. 
+   By looking ahead, the program don't need to search the whole search tree. 
+   It may seems not elegant, but greatly useful to reduce the complexity in situation like deep brackets.
 -}
 pList :: Parser Exp
 pList = 
@@ -286,7 +285,7 @@ pExprs = do
 
 pCall :: Parser Exp
 pCall = do
-           a <- pIndentSkipSpace
+           a <- pIndent
            e<- between (symbol "(") (symbol ")") pExprz
            return $ Call a e
 
@@ -301,7 +300,6 @@ pCompr =
            symbol "]"
            return $ Compr e (for ++ other)
 
---   Clausez ::= ε | ForClause Clausez | IfClause Clausez
 pClause:: Parser [CClause]
 pClause= do e <- pFor
             es <- pClause
@@ -317,21 +315,21 @@ pClause= do e <- pFor
 
 pFor :: Parser [CClause]
 pFor = do
-           name <- between (symbolForceFollowingSpace "for") (symbolForceFollowingSpace "in") pIndentSkipSpace
+           name <- between forKeywords (keywordsForceFollowSpace "in") pIndent
            e <- pExpr
            return  [CCFor name e]
 
 
 pIf :: Parser [CClause]
 pIf = do
-           symbolForceFollowingSpace "if"
+           keywordsForceFollowSpace "if"
            e <- pExpr
            return  [CCIf e]
 
 
 {-
-when getting a simple, handle the following space or comment at the same time,
-then we don't need to consider space or comment when dealing with next expression.
+when getting a symbol, handle the following space or comment at the same time,
+then we can guarantee there will be no space before next expression.
 -}
 symbol:: String ->Parser ()
 symbol s = do
@@ -339,17 +337,30 @@ symbol s = do
                skipSpaceAndComment
                return ()
 
-symbolHelper:: Parser a -> Parser a
-symbolHelper p = do
-             a <- p
-             skipSpaceAndComment
-             return a
-
-symbolForceFollowingSpace :: String -> Parser ()
-symbolForceFollowingSpace s = do
-   string s
+{-
+   keywords including "in" "not" "if", must be followed by one of them:
+      1. "[" 
+      2. space 
+      3. "(" 
+      4."#"
+   so, have to use this function to parse these keywords.
+-}
+keywordsForceFollowSpace :: String -> Parser ()
+keywordsForceFollowSpace s = do
+   string s 
    x <- look
    if head x == '[' || isSpace (head x) || head x == '(' || head x == '#'
+      then skipSpaceAndComment
+      else return pfail "keywords can not be used as variable"
+
+{-
+   when it comes to "for", it can not be followed by "[", but only "(" "#" space
+-}
+forKeywords:: Parser()
+forKeywords = do
+   string "for"
+   x <- look
+   if isSpace (head x) || head x == '(' || head x == '#'
       then skipSpaceAndComment
       else return pfail "keywords can not be used as variable"
 

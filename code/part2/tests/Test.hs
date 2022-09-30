@@ -134,6 +134,18 @@ tests = testGroup "Minimal tests" [
     testCase "oper-test7" $
        parseString "x = 3+5 != 3*(3+1)" @?=
         Right [SDef "x" (Not (Oper Eq (Oper Plus (Const $ IntVal 3) (Const $ IntVal 5)) (Oper Times (Const $IntVal 3) (Oper Plus (Const $ IntVal 3) (Const $ IntVal 1)) ) ))] ,
+    testCase "oper-test8" $
+       parseString "not(3+5 != 3*(3+1))" @?=
+        Right [SExp $ Not (Not (Oper Eq (Oper Plus (Const $ IntVal 3) (Const $ IntVal 5)) (Oper Times (Const $IntVal 3) (Oper Plus (Const $ IntVal 3) (Const $ IntVal 1)) ) ))] ,
+    testCase "oper-test9" $
+       parseString "not 3+5 != 3*(3+1)" @?=
+        Right [SExp $ Not  (Not (Oper Eq (Oper Plus (Const $ IntVal 3) (Const $ IntVal 5)) (Oper Times (Const $IntVal 3) (Oper Plus (Const $ IntVal 3) (Const $ IntVal 1)) ) ))] ,
+    testCase "oper-test10" $
+       parseString "not 3+5 != 3*(3%1)" @?=
+        Right [SExp $ Not  (Not (Oper Eq (Oper Plus (Const $ IntVal 3) (Const $ IntVal 5)) (Oper Times (Const $IntVal 3) (Oper Mod (Const $ IntVal 3) (Const $ IntVal 1)) ) ))] ,
+    testCase "oper-test11" $
+       parseString "not 3+5 != 3*3%1" @?=
+        Right [SExp (Not (Not (Oper Eq (Oper Plus (Const (IntVal 3)) (Const (IntVal 5))) (Oper Mod (Oper Times (Const (IntVal 3)) (Const (IntVal 3))) (Const (IntVal 1))))))] ,
 
 
     testCase "comment-test0" $
@@ -216,7 +228,7 @@ tests = testGroup "Minimal tests" [
     testCase "parenthesis-test0" $
       parseString "x = ((((((((((((((((((((((((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))))" @?=
         Right [SDef "x" (Const $IntVal 1)],
-    testCase "parenthesis-test1" $
+    testCase "parenthesis-test1" $ 
       parseString "[[[[[[[[[[[[[[[[x]]]]]]]]]]]]]]]]" @?=
         Right [SExp (List [List [List [List [List [List [List [List [List [List [List [List [List [List [List [List [Var "x"]]]]]]]]]]]]]]]])],
     testCase "parenthesis-test2" $
